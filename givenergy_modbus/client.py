@@ -74,6 +74,10 @@ class GivEnergyClient:
             self.modbus_client.write_holding_register(HoldingRegister.ENABLE_CHARGE_TARGET, True)
             self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC, target_soc)
 
+    def reboot_invertor(self):
+        """Reboot Invertor"""
+        self.modbus_client.write_holding_register(HoldingRegister.REBOOT_INVERTOR, 100)
+
     def disable_charge_target(self):
         """Removes SOC limit and target 100% charging."""
         self.modbus_client.write_holding_register(HoldingRegister.ENABLE_CHARGE_TARGET, False)
@@ -179,7 +183,8 @@ class GivEnergyClient:
             self.set_battery_discharge_mode_max_power()  # r27=0
         else:
             self.set_battery_discharge_mode_demand()  # r27=1
-        self.set_shallow_charge(100)  # r110=100
+        # Remove this line to allow discharge
+        #self.set_shallow_charge(100)  # r110=100
         self.enable_discharge()  # r59=1
         self.set_discharge_slot_1(slot_1)  # r56=1600, r57=700
         if slot_2:
@@ -204,6 +209,11 @@ class GivEnergyClient:
         """Set the minimum level of charge to keep."""
         # TODO what are valid values? 4-100?
         self.modbus_client.write_holding_register(HoldingRegister.BATTERY_SOC_RESERVE, val)
+
+    def set_active_power_rate(self, val: int):
+        """Set the mmaximum invertor power rate."""
+        # TODO what are valid values? 0-100?
+        self.modbus_client.write_holding_register(HoldingRegister.ACTIVE_POWER_RATE, val)
 
     def set_battery_charge_limit(self, val: int):
         """Set the battery charge power limit as percentage. 50% (2.6 kW) is the maximum for most inverters."""

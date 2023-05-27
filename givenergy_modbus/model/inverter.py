@@ -3,6 +3,7 @@ import datetime
 import logging
 from enum import Enum
 from typing import Tuple
+import math
 
 from pydantic import root_validator
 
@@ -19,24 +20,75 @@ class Model(str, Enum):
     """Known models of inverters."""
 
     AC = 'AC'
-    Gen2 = 'Gen2'
     Hybrid = 'Hybrid'
+    EMS = 'EMS'
+    Gateway = 'Gateway'
+    AllinOne = "All in One"
 
-    __serial_prefix_to_models_lut__ = {
-        'CE': AC,
-        'ED': Gen2,
-        'SA': Hybrid,
-        'SD': Hybrid,
+    __dtc_to_models_lut__ = {
+        2: Hybrid,
+        3: AC,
+        4: Hybrid,
+        5: EMS,
+        6: AC,
+        7: Gateway,
+        8: AllinOne,
     }
 
     @classmethod
-    def from_serial_number(cls, serial_number: str):
+    def from_device_type_code(cls, device_type_code: str):
         """Return the appropriate model from a given serial number."""
-        prefix = serial_number[:2]
-        if prefix in cls.__serial_prefix_to_models_lut__:
-            return cls.__serial_prefix_to_models_lut__[prefix]
+        prefix = int(device_type_code[0])
+        if prefix in cls.__dtc_to_models_lut__:
+            return cls.__dtc_to_models_lut__[prefix]
         else:
-            raise UnknownModelError(f"Cannot determine model number from serial number {serial_number}")
+            # raise UnknownModelError(f"Cannot determine model number from serial number {serial_number}")
+            return 'Unknown'    
+
+class Phase(str, Enum):
+    """Determine number of Phases."""
+
+    OnePhase= "Single Phase",
+    ThreePhase= "Three Phase",
+
+    __dtc_to_phases_lut__ = {
+        2: OnePhase,
+        3: OnePhase,
+        4: ThreePhase,
+        5: OnePhase,
+        6: ThreePhase,
+        7: OnePhase,
+        8: OnePhase,
+    }
+
+    @classmethod
+    def from_device_type_code(cls, device_type_code: str):
+        """Return the appropriate model from a given serial number."""
+        prefix = int(device_type_code[0])
+        if prefix in cls.__dtc_to_phases_lut__:
+            return cls.__dtc_to_phases_lut__[prefix]
+        else:
+            # raise UnknownModelError(f"Cannot determine model number from serial number {serial_number}")
+            return 'Unknown'   
+
+class Generation(str, Enum):
+    """Known Generations"""
+    Gen1 = 'Gen 1'
+    Gen2 = 'Gen 2'
+
+    __dtc_to_models_lut__ = {
+        8: Gen2,
+        9: Gen2,
+    }
+
+    @classmethod
+    def from_fw_version(cls, firmware_version: str):
+        """Return the appropriate model from a given serial number."""
+        genint=math.floor(int(firmware_version)/100)   
+        if genint in cls.__dtc_to_models_lut__:
+            return cls.Gen2
+        else:
+            return cls.Gen1  
 
 
 class Inverter(GivEnergyBaseModel):
@@ -208,8 +260,20 @@ class Inverter(GivEnergyBaseModel):
 
     @root_validator
     def compute_model(cls, values) -> dict:
-        """Computes the inverter model from the serial number prefix."""
-        values['inverter_model'] = Model.from_serial_number(values['inverter_serial_number'])
+        """Computes the inverter model from the device type code."""
+        values['inverter_model'] = Model.from_device_type_code(values['device_type_code'])
+        return values
+
+    @root_validator
+    def compute_phases(cls, values) -> dict:
+        """Computes the number of phases from the device type code."""
+        values['inverter_phases'] = Phase.from_device_type_code(values['device_type_code'])
+        return values
+
+    @root_validator
+    def compute_generation(cls, values) -> dict:
+        """Computes the inverter model from the firmware version."""
+        values['inverter_generation'] = Generation.from_fw_version(values['arm_firmware_version'])
         return values
 
     @root_validator

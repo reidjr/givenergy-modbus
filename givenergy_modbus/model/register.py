@@ -214,7 +214,7 @@ class HoldingRegister(Register):
     REVERSE_115_METER_DIRECT = (48, {'type': Type.BOOL})
     REVERSE_418_METER_DIRECT = (49, {'type': Type.BOOL})
     # from beta remote control: Inverter Max Output Active Power Percent
-    ACTIVE_POWER_RATE = (50, {'type': Type.PERCENT})
+    ACTIVE_POWER_RATE = (50, {'type': Type.PERCENT, 'write_safe': True})
     REACTIVE_POWER_RATE = (51, {'type': Type.PERCENT})
     POWER_FACTOR = (52, {'type': Type.POWER_FACTOR})
     INVERTER_STATE = (53, {'type': Type.DUINT8})  # MSB:auto-restart state, LSB:on/off
@@ -331,7 +331,7 @@ class HoldingRegister(Register):
     HOLDING_REG160 = (160, {})
     HOLDING_REG161 = (161, {})
     HOLDING_REG162 = (162, {})
-    HOLDING_REG163 = (163, {})
+    REBOOT_INVERTOR = (163, {'write_safe': True})
     HOLDING_REG164 = (164, {})
     HOLDING_REG165 = (165, {})
     HOLDING_REG166 = (166, {})
