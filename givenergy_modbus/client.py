@@ -34,7 +34,7 @@ class GivEnergyClient:
         self,
         pages: Mapping[type[HoldingRegister | InputRegister], Sequence[int]],
         register_cache: RegisterCache,
-        slave_address: int = 0x32,
+        slave_address: int = 0x31,
         sleep_between_queries: float = DEFAULT_SLEEP,
     ) -> None:
         """Reload all inverter data from the device."""
@@ -44,18 +44,26 @@ class GivEnergyClient:
                 register_cache.set_registers(register, data)
                 t.sleep(sleep_between_queries)
 
-    def refresh_plant(self, plant: Plant, full_refresh: bool, sleep_between_queries=DEFAULT_SLEEP):
+    def refresh_plant(self, plant: Plant, isAIO: bool, full_refresh: bool, sleep_between_queries=DEFAULT_SLEEP):
         """Refresh the internal caches for a plant. Optionally refresh only data that changes frequently."""
         inverter_registers = {
             InputRegister: [0, 180],
         }
 
         if full_refresh:
-            inverter_registers[HoldingRegister] = [0, 60, 120]
+            inverter_registers[HoldingRegister] = [0, 60, 120, 240, 300]
 
-        self.fetch_register_pages(
-            inverter_registers, plant.inverter_rc, slave_address=0x32, sleep_between_queries=sleep_between_queries
-        )
+        #How do I know which inverter I'm connecting to from inside the library...
+        if isAIO:
+            self.fetch_register_pages(
+                inverter_registers, plant.inverter_rc, slave_address=0x11, sleep_between_queries=sleep_between_queries
+            )
+            _logger.debug("Inverter is AIO so using the 0x11 slave_address")
+        else:
+            self.fetch_register_pages(
+                inverter_registers, plant.inverter_rc, slave_address=0x31, sleep_between_queries=sleep_between_queries
+            )
+            _logger.debug("Inverter is normal so using the 0x31 slave_address")
         for i, battery_rc in enumerate(plant.batteries_rcs):
             self.fetch_register_pages(
                 {InputRegister: [60]},
@@ -63,6 +71,19 @@ class GivEnergyClient:
                 slave_address=0x32 + i,
                 sleep_between_queries=sleep_between_queries,
             )
+
+    def get_inverter_stats(self):
+        SN={}
+        regs=self.modbus_client.read_holding_registers(0,22)
+        DTC=hex(regs[0])[-4:] #plant.inverter.device_type_code
+        SN_1=bytes.fromhex(hex(regs[13])[2:]).decode("ASCII")
+        SN_2=bytes.fromhex(hex(regs[14])[2:]).decode("ASCII")
+        SN_3=bytes.fromhex(hex(regs[15])[2:]).decode("ASCII")
+        SN_4=bytes.fromhex(hex(regs[16])[2:]).decode("ASCII")
+        SN_5=bytes.fromhex(hex(regs[17])[2:]).decode("ASCII")
+        SN=SN_1+SN_2+SN_3+SN_4+SN_5 #SN=plant.inverter.inverter_serial_number
+        FW=regs[21] #plant.inverter.arm_firmware_version
+        return DTC,FW,SN
 
     def enable_charge_target(self, target_soc: int):
         """Sets inverter to stop charging when SOC reaches the desired level. Also referred to as "winter mode"."""
@@ -74,10 +95,41 @@ class GivEnergyClient:
             self.modbus_client.write_holding_register(HoldingRegister.ENABLE_CHARGE_TARGET, True)
             self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC, target_soc)
 
-    def reboot_invertor(self):
+    def enable_charge_target_2(self, target_soc: int, slot: int):
+        """Sets inverter to stop charging when SOC reaches the desired level. Also referred to as "winter mode"."""
+        if not 4 <= target_soc <= 100:
+            raise ValueError(f'Specified Charge Target SOC ({target_soc}) is not in [4-100]')
+        if target_soc == 100:
+            self.disable_charge_target()
+        else:
+            self.modbus_client.write_holding_register(HoldingRegister.ENABLE_CHARGE_TARGET, True)
+            if slot==1:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC, target_soc)
+            if slot==2:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_2, target_soc)
+            if slot==3:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_3, target_soc)
+            if slot==4:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_4, target_soc)
+            if slot==5:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_5, target_soc)
+            if slot==6:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_6, target_soc)
+            if slot==7:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_7, target_soc)
+            if slot==8:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_8, target_soc)
+            if slot==9:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_9, target_soc)
+            if slot==10:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC_10, target_soc)
+                
+
+
+    def reboot_inverter(self):
         """Reboot Invertor"""
         ### WARNING - MODIFYING THIS FUNCTION TO USE ANY OTHER VALUE THAN 100 WILL BRICK YOUR INVERTOR... DON'T DO IT!
-        self.modbus_client.write_holding_register(HoldingRegister.REBOOT_INVERTOR, 100)
+        self.modbus_client.write_holding_register(HoldingRegister.REBOOT_INVERTER, 100)
 
     def disable_charge_target(self):
         """Removes SOC limit and target 100% charging."""
@@ -108,49 +160,181 @@ class GivEnergyClient:
         """Set the battery to discharge to match demand (no export) when discharging."""
         self.modbus_client.write_holding_register(HoldingRegister.BATTERY_POWER_MODE, 1)
 
-    def set_charge_slot_1(self, times: tuple[time, time]):
-        """Set first charge slot times."""
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_START, int(times[0].strftime('%H%M')))
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_END, int(times[1].strftime('%H%M')))
+#    def set_charge_slot_1(self, times: tuple[time, time]):
+#        """Set first charge slot times."""
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_START, int(times[0].strftime('%H%M')))
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_END, int(times[1].strftime('%H%M')))
 
-    def reset_charge_slot_1(self):
-        """Reset first charge slot times to zero/disabled."""
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_START, 0)
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_END, 0)
+#    def set_charge_slot_start_1(self, timeslot: time):
+#        """Set first charge slot start time."""
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_START, int(timeslot.strftime('%H%M')))
 
-    def set_charge_slot_2(self, times: tuple[time, time]):
-        """Set second charge slot times."""
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_START, int(times[0].strftime('%H%M')))
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_END, int(times[1].strftime('%H%M')))
+#    def set_charge_slot_end_1(self, timeslot: time):
+#        """Set first charge slot end time."""
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_END, int(timeslot.strftime('%H%M')))
 
-    def reset_charge_slot_2(self):
-        """Reset second charge slot times to zero/disabled."""
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_START, 0)
-        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_END, 0)
+#    def reset_charge_slot_1(self):
+#        """Reset first charge slot times to zero/disabled."""
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_START, 0)
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_END, 0)
 
-    def set_discharge_slot_1(self, times: tuple[time, time]):
-        """Set first discharge slot times."""
-        self.modbus_client.write_holding_register(
-            HoldingRegister.DISCHARGE_SLOT_1_START, int(times[0].strftime('%H%M'))
-        )
-        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_END, int(times[1].strftime('%H%M')))
+#    def set_charge_slot_2(self, times: tuple[time, time]):
+#        """Set second charge slot times."""
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_START, int(times[0].strftime('%H%M')))
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_END, int(times[1].strftime('%H%M')))
 
-    def reset_discharge_slot_1(self):
-        """Reset first discharge slot times to zero/disabled."""
-        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_START, 0)
-        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_END, 0)
+#    def reset_charge_slot_2(self):
+#        """Reset second charge slot times to zero/disabled."""
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_START, 0)
+#        self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_2_END, 0)
 
-    def set_discharge_slot_2(self, times: tuple[time, time]):
-        """Set second discharge slot times."""
-        self.modbus_client.write_holding_register(
-            HoldingRegister.DISCHARGE_SLOT_2_START, int(times[0].strftime('%H%M'))
-        )
-        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_END, int(times[1].strftime('%H%M')))
+#    def set_discharge_slot_1(self, times: tuple[time, time]):
+#        """Set first discharge slot times."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_START, int(times[0].strftime('%H%M')))
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_END, int(times[1].strftime('%H%M')))
 
-    def reset_discharge_slot_2(self):
-        """Reset first discharge slot times to zero/disabled."""
-        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_START, 0)
-        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_END, 0)
+#    def set_discharge_slot_start_1(self, timeslot: time):
+#        """Set first charge slot start time."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_START, int(timeslot.strftime('%H%M')))
+
+#    def set_discharge_slot_end_1(self, timeslot: time):
+#        """Set first charge slot end time."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_END, int(timeslot.strftime('%H%M')))   
+
+#    def reset_discharge_slot_1(self):
+#        """Reset first discharge slot times to zero/disabled."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_START, 0)
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_END, 0)
+
+#    def set_discharge_slot_2(self, times: tuple[time, time]):
+#        """Set second discharge slot times."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_START, int(times[0].strftime('%H%M')))
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_END, int(times[1].strftime('%H%M')))
+
+#    def set_discharge_slot_start_2(self, timeslot: time):
+#        """Set first charge slot start time."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_START, int(timeslot.strftime('%H%M')))
+
+#    def set_discharge_slot_end_2(self, timeslot: time):
+#        """Set first charge slot end time."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_END, int(timeslot.strftime('%H%M')))  
+
+#    def reset_discharge_slot_2(self):
+#        """Reset first discharge slot times to zero/disabled."""
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_START, 0)
+#        self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_END, 0)
+
+    def set_discharge_slot_start(self, slot: int, timeslot: time):
+        """Set discharge slot start time, for any slot 1-10."""
+        #  slot n = 276+((n-3)*3)
+        if 1 <=slot <=10:
+            if slot==1:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_START, int(timeslot.strftime('%H%M')))
+            elif slot==2:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_START, int(timeslot.strftime('%H%M')))
+            elif slot==3:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_3_START, int(timeslot.strftime('%H%M')))
+            elif slot==4:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_4_START, int(timeslot.strftime('%H%M')))
+            elif slot==5:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_5_START, int(timeslot.strftime('%H%M')))
+            elif slot==6:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_6_START, int(timeslot.strftime('%H%M')))
+            elif slot==7:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_7_START, int(timeslot.strftime('%H%M')))
+            elif slot==8:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_8_START, int(timeslot.strftime('%H%M')))
+            elif slot==9:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_9_START, int(timeslot.strftime('%H%M')))
+            elif slot==10:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_10_START, int(timeslot.strftime('%H%M')))
+        else:
+            raise ValueError(f'Specified slot ({slot}) is not in [1-10]')
+
+    def set_discharge_slot_end(self, slot: int, timeslot: time):
+        """Set discharge slot start time, for any slot 3-10."""
+        #  slot n = 277+((n-3)*3)
+        if 1 <=slot <=10:
+            if slot==1:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_END, int(timeslot.strftime('%H%M')))
+            elif slot==2:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_END, int(timeslot.strftime('%H%M')))
+            elif slot==3:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_3_END, int(timeslot.strftime('%H%M')))
+            elif slot==4:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_4_END, int(timeslot.strftime('%H%M')))
+            elif slot==5:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_5_END, int(timeslot.strftime('%H%M')))
+            elif slot==6:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_6_END, int(timeslot.strftime('%H%M')))
+            elif slot==7:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_7_END, int(timeslot.strftime('%H%M')))
+            elif slot==8:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_8_END, int(timeslot.strftime('%H%M')))
+            elif slot==9:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_9_END, int(timeslot.strftime('%H%M')))
+            elif slot==10:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_10_END, int(timeslot.strftime('%H%M')))
+        else:
+            raise ValueError(f'Specified slot ({slot}) is not in [1-10]%')
+        
+    def set_discharge_slot(self, slot: int, times: tuple[time, time]):
+        """Set discharge slot time, for any slot 3-10."""
+        #  slot n = 276+((n-3)*3)
+        if 1 <=slot <=10:
+            if slot==1:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_START, int(times[0].strftime('%H%M')))
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_1_END, int(times[1].strftime('%H%M')))
+            elif slot==2:
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_START, int(times[0].strftime('%H%M')))
+                self.modbus_client.write_holding_register(HoldingRegister.DISCHARGE_SLOT_2_END, int(times[1].strftime('%H%M')))
+            else:
+                self.modbus_client.write_holding_register(HoldingRegister(276+((slot-3)*3)), int(times[0].strftime('%H%M')))
+                self.modbus_client.write_holding_register(HoldingRegister(277+((slot-3)*3)), int(times[1].strftime('%H%M')))  
+        else:
+            raise ValueError(f'Specified slot ({slot}) is not in [1-10]%')
+        
+    def set_charge_slot_start(self, slot: int, timeslot: time):
+        """Set discharge slot start time, for any slot 2-10."""
+        #  slot n = 243+((n-2)*3)
+        if 1 <=slot <=10:
+            if slot==1:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_START, int(timeslot.strftime('%H%M')))
+            else:
+                self.modbus_client.write_holding_register(HoldingRegister(243+((slot-3)*3)), int(timeslot.strftime('%H%M')))
+        else:
+            raise ValueError(f'Specified slot ({slot}) is not in [1-10]%')
+        
+    def set_charge_slot_end(self, slot: int, timeslot: time):
+        """Set discharge slot start time, for any slot 2-10."""
+        #  slot n = 244+((n-2)*3)
+        if 1 <=slot <=10:
+            if slot==1:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_END, int(timeslot.strftime('%H%M')))
+            else:
+                self.modbus_client.write_holding_register(HoldingRegister(244+((slot-2)*3)), int(timeslot.strftime('%H%M')))
+        else:
+            raise ValueError(f'Specified slot ({slot}) is not in [1-10]%')
+        
+    def set_charge_slot(self, slot: int, times: tuple[time, time]):
+        """Set charge slot time, for any slot 2-10."""
+        if 1 <=slot <=10:
+            if slot==1:
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_START, int(times[0].strftime('%H%M')))
+                self.modbus_client.write_holding_register(HoldingRegister.CHARGE_SLOT_1_END, int(times[1].strftime('%H%M')))
+            else:
+                self.modbus_client.write_holding_register(HoldingRegister(243+((slot-2)*3)), int(times[0].strftime('%H%M')))
+                self.modbus_client.write_holding_register(HoldingRegister(244+((slot-2)*3)), int(times[1].strftime('%H%M')))  
+        else:
+            raise ValueError(f'Specified slot ({slot}) is not in [1-10]%')
+        
+    def set_pause_slot_start(self, timeslot: time):
+        """Set first charge slot start time."""
+        self.modbus_client.write_holding_register(HoldingRegister.BATTERY_PAUSE_SLOT_START, int(timeslot.strftime('%H%M')))
+
+    def set_pause_slot_end(self, timeslot: time):
+        """Set first charge slot end time."""
+        self.modbus_client.write_holding_register(HoldingRegister.BATTERY_PAUSE_SLOT_END, int(timeslot.strftime('%H%M')))  
 
     def set_mode_dynamic(self):
         """Set system to Dynamic / Eco mode.
@@ -212,7 +396,7 @@ class GivEnergyClient:
         self.modbus_client.write_holding_register(HoldingRegister.BATTERY_SOC_RESERVE, val)
 
     def set_active_power_rate(self, val: int):
-        """Set the mmaximum invertor power rate."""
+        """Set the mmaximum inverter power rate."""
         # TODO what are valid values? 0-100?
         self.modbus_client.write_holding_register(HoldingRegister.ACTIVE_POWER_RATE, val)
 
@@ -237,3 +421,27 @@ class GivEnergyClient:
         """Set the target SOC when the battery charges."""
         # TODO what are valid values?
         self.modbus_client.write_holding_register(HoldingRegister.CHARGE_TARGET_SOC, val)
+
+    def set_pv_input_mode(self, val: int):
+        """Set MPPT Tracking mode."""
+        # TODO what are valid values?
+        if val in [0,1]:
+            self.modbus_client.write_holding_register(HoldingRegister.PV_INPUT_MODE, val)
+        else:
+            raise ValueError(f'Specified Mode ({val}) is not in [0,1]%')
+
+    def set_battery_pause_mode(self, val: int):
+        """Set the forbid flag for charge/discharge."""
+        # TODO what are valid values?
+        if val in [0,1,2,3]:
+            self.modbus_client.write_holding_register(HoldingRegister.BATTERY_PAUSE_MODE, val)
+        else:
+            raise ValueError(f'Specified Mode ({val}) is not in [0,1]')
+
+    def set_local_control_mode(self, val: int):
+        """Set the priority of output."""
+        # TODO what are valid values?
+        if val in [0,1,2]:
+            self.modbus_client.write_holding_register(HoldingRegister.LOCAL_CONTROL_MODE, val)
+        else:
+            raise ValueError(f'Specified Mode ({val}) is not in [0,1]%')

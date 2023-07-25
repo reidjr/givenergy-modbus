@@ -71,12 +71,37 @@ class Phase(str, Enum):
             # raise UnknownModelError(f"Cannot determine model number from serial number {serial_number}")
             return 'Unknown'   
 
+class InvertorPower(str, Enum):
+    """Map Invertor max power"""
+    __dtc_to_power_lut__ = {
+        '2001': 5000,
+        '2002': 4600,
+        '2003': 3600,
+        '3001': 3000,
+        '3002': 3600,
+        '4001': 6000,
+        '4002': 8000,
+        '4003': 10000,
+        '4004': 11000,
+        '8001': 6000
+    }
+    @classmethod
+    def from_dtc_power(cls, dtc: str):
+        """Return the appropriate model from a given serial number."""
+        if dtc in cls.__dtc_to_power_lut__:
+            return cls.__dtc_to_power_lut__[dtc]
+        else:
+            return 0
+
+
 class Generation(str, Enum):
     """Known Generations"""
     Gen1 = 'Gen 1'
     Gen2 = 'Gen 2'
+    Gen3 = 'Gen 3'
 
     __dtc_to_models_lut__ = {
+        3: Gen3,
         8: Gen2,
         9: Gen2,
     }
@@ -84,11 +109,11 @@ class Generation(str, Enum):
     @classmethod
     def from_fw_version(cls, firmware_version: str):
         """Return the appropriate model from a given serial number."""
-        genint=math.floor(int(firmware_version)/100)   
+        genint=math.floor(int(firmware_version)/100) 
         if genint in cls.__dtc_to_models_lut__:
-            return cls.Gen2
+            return cls.__dtc_to_models_lut__[genint]
         else:
-            return cls.Gen1  
+            return cls.Gen1
 
 
 class Inverter(GivEnergyBaseModel):
@@ -184,8 +209,24 @@ class Inverter(GivEnergyBaseModel):
 
     charge_slot_1: Tuple[datetime.time, datetime.time]
     charge_slot_2: Tuple[datetime.time, datetime.time]
+    charge_slot_3: Tuple[datetime.time, datetime.time]
+    charge_slot_4: Tuple[datetime.time, datetime.time]
+    charge_slot_5: Tuple[datetime.time, datetime.time]
+    charge_slot_6: Tuple[datetime.time, datetime.time]
+    charge_slot_7: Tuple[datetime.time, datetime.time]
+    charge_slot_8: Tuple[datetime.time, datetime.time]
+    charge_slot_9: Tuple[datetime.time, datetime.time]
+    charge_slot_10: Tuple[datetime.time, datetime.time]
     discharge_slot_1: Tuple[datetime.time, datetime.time]
     discharge_slot_2: Tuple[datetime.time, datetime.time]
+    discharge_slot_3: Tuple[datetime.time, datetime.time]
+    discharge_slot_4: Tuple[datetime.time, datetime.time]
+    discharge_slot_5: Tuple[datetime.time, datetime.time]
+    discharge_slot_6: Tuple[datetime.time, datetime.time]
+    discharge_slot_7: Tuple[datetime.time, datetime.time]
+    discharge_slot_8: Tuple[datetime.time, datetime.time]
+    discharge_slot_9: Tuple[datetime.time, datetime.time]
+    discharge_slot_10: Tuple[datetime.time, datetime.time]
     charge_and_discharge_soc: Tuple[int, int]
 
     battery_low_force_charge_time: int
@@ -195,10 +236,36 @@ class Inverter(GivEnergyBaseModel):
     island_check_continue: int
     battery_discharge_min_power_reserve: int
     charge_target_soc: int
-    charge_soc_stop_2: int
-    discharge_soc_stop_2: int
-    charge_soc_stop_1: int
-    discharge_soc_stop_1: int
+    charge_target_soc_1: int
+    charge_target_soc_2: int
+    charge_target_soc_3: int
+    charge_target_soc_4: int
+    charge_target_soc_5: int
+    charge_target_soc_6: int
+    charge_target_soc_7: int
+    charge_target_soc_8: int
+    charge_target_soc_9: int
+    charge_target_soc_10: int
+    discharge_target_soc_1: int
+    discharge_target_soc_2: int
+    discharge_target_soc_3: int
+    discharge_target_soc_4: int
+    discharge_target_soc_5: int
+    discharge_target_soc_6: int
+    discharge_target_soc_7: int
+    discharge_target_soc_8: int
+    discharge_target_soc_9: int
+    discharge_target_soc_10: int
+
+#    charge_soc_stop_2: int
+#    discharge_soc_stop_2: int
+#    charge_soc_stop_1: int
+#    discharge_soc_stop_1: int
+
+    local_control_mode: int
+    pv_input_mode: int
+    battery_pause_mode: int
+    battery_pause_slot: Tuple[datetime.time, datetime.time]
 
     # InputRegisters
     inverter_status: int
@@ -274,6 +341,12 @@ class Inverter(GivEnergyBaseModel):
     def compute_generation(cls, values) -> dict:
         """Computes the inverter model from the firmware version."""
         values['inverter_generation'] = Generation.from_fw_version(values['arm_firmware_version'])
+        return values
+
+    @root_validator
+    def compute_maxpower(cls, values) -> dict:
+        """Computes the inverter model from the firmware version."""
+        values['inverter_maxpower'] = InvertorPower.from_dtc_power(values['device_type_code'])
         return values
 
     @root_validator
