@@ -1,3 +1,6 @@
+Patched with GivTCP modbus changes to support givenergy local
+
+
 # GivEnergy Modbus
 
 [![pypi](https://img.shields.io/pypi/v/givenergy-modbus.svg)](https://pypi.org/project/givenergy-modbus/)
