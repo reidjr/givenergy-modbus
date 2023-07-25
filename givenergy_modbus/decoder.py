@@ -65,8 +65,7 @@ class GivEnergyDecoder(IModbusDecoder, metaclass=abc.ABCMeta):
             fn_code = data[19]
             response = self.lookupPduClass(fn_code)
             if response:
-##### changed logging here debug->info
-                _logger.info(f"About to decode data [{hexlify(data[18:])}]")
+                _logger.debug(f"About to decode data [{hexlify(data)}]")
                 r = response(function_code=fn_code)
                 r.decode(data)
                 return r
